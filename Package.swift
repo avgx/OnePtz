@@ -36,7 +36,10 @@ let package = Package(
         ),
         .testTarget(
             name: "OnePtzTests",
-            dependencies: ["OnePtz"]
+            dependencies: [
+                "OnePtz",
+                .product(name: "OneWireFormat", package: "OneWireFormat"),
+            ]
         ),
         .testTarget(
             name: "OnePtzIntegrationTests",
