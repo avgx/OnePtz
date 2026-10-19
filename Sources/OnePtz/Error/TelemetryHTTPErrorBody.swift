@@ -28,39 +28,47 @@ public enum TelemetryHTTPErrorBody {
         return payload
     }
 
-    /// Prettified `errorMessage` when the body carries one.
+    /// Prettified `errorMessage`, or a servlet `error_code` label when that is all the body has.
     public static func userFacingMessage(body: Data) -> String? {
-        guard let message = decode(body)?.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !message.isEmpty
-        else { return nil }
-        return prettifyTelemetryMessage(message)
+        if let message = decode(body)?.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !message.isEmpty {
+            return prettifyTelemetryMessage(message)
+        }
+        return LegacyTelemetryErrorCode.decode(body)?.userMessage
     }
 
-    /// `errorMessage`, gRPC code name, and HTTP status. Nil when the body is not a telemetry error payload.
+    /// `errorMessage`, gRPC code name, servlet `error_code`, and HTTP status.
+    /// Nil when the body is not a telemetry error payload.
     public static func logDetail(body: Data, statusCode: Int?) -> String? {
-        guard let payload = decode(body) else { return nil }
         var parts: [String] = []
-        if let message = payload.errorMessage, !message.isEmpty {
-            parts.append(message)
+        if let payload = decode(body) {
+            if let message = payload.errorMessage, !message.isEmpty {
+                parts.append(message)
+            }
+            if let code = payload.grpcErrorCode {
+                parts.append("grpc=\(code) (\(grpcCodeName(code)))")
+            }
         }
-        if let code = payload.grpcErrorCode {
-            parts.append("grpc=\(code) (\(grpcCodeName(code)))")
+        if let code = LegacyTelemetryErrorCode.decode(body) {
+            parts.append("error_code=\(code.rawValue) (\(code.logName))")
         }
+        guard !parts.isEmpty else { return nil }
         if let statusCode {
             parts.append("http=\(statusCode)")
         }
-        return parts.isEmpty ? nil : parts.joined(separator: " ")
+        return parts.joined(separator: " ")
     }
 
     /// Native `/v1/telemetry` is not mounted.
     ///
-    /// `grpcErrorCode == 12` (UNIMPLEMENTED), or HTTP 404/501 with no gRPC code.
+    /// `grpcErrorCode == 12` (UNIMPLEMENTED), or HTTP 403/404/501 with no gRPC code.
+    /// A 403 that carries another gRPC code (for example 7, PERMISSION_DENIED) means the method exists.
     /// Any other gRPC code, including 5 (NOT_FOUND), means the method exists.
     public static func isNativeRouteMissing(body: Data, statusCode: Int) -> Bool {
         if let code = decode(body)?.grpcErrorCode {
             return code == 12
         }
-        return statusCode == 404 || statusCode == 501
+        return statusCode == 403 || statusCode == 404 || statusCode == 501
     }
 
     public static func grpcCodeName(_ code: Int) -> String {
